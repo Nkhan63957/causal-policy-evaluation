@@ -1,0 +1,155 @@
+import pandas as pd
+import numpy as np
+FED_MW = {
+    1990:3.80,1991:4.25,1992:4.25,1993:4.25,1994:4.25,
+    1995:4.25,1996:4.75,1997:5.15,1998:5.15,1999:5.15,
+    2000:5.15,2001:5.15,2002:5.15,2003:5.15,2004:5.15,
+    2005:5.15,2006:5.15,2007:5.85,2008:6.55,2009:7.25,
+    2010:7.25,2011:7.25,2012:7.25,2013:7.25,2014:7.25,
+    2015:7.25,2016:7.25,2017:7.25,2018:7.25,2019:7.25,
+    2020:7.25,2021:7.25,2022:7.25,2023:7.25
+}
+
+CPI = {
+    1990:100.0,1991:104.2,1992:107.4,1993:110.6,1994:113.4,
+    1995:116.6,1996:120.1,1997:122.9,1998:124.7,1999:127.0,
+    2000:130.7,2001:134.2,2002:136.2,2003:139.1,2004:143.3,
+    2005:148.0,2006:152.5,2007:157.3,2008:163.6,2009:163.0,
+    2010:165.6,2011:170.9,2012:175.0,2013:177.6,2014:180.4,
+    2015:180.9,2016:183.0,2017:187.3,2018:191.8,2019:195.9,
+    2020:197.8,2021:208.7,2022:232.4,2023:244.0
+}
+warnings.filterwarnings('ignore')
+
+np.random.seed(42)
+
+# ── State employment anchors (thousands) ──────────────────────────────────────
+# Based on BLS QCEW 2000 baseline employment levels
+STATE_EMP_2000 = {
+    'AL':1889,'AK':299,'AZ':2185,'AR':1116,'CA':15521,'CO':2153,
+    'CT':1658,'DE':411,'FL':7301,'GA':3876,'HI':568,'ID':594,
+    'IL':5843,'IN':2846,'IA':1416,'KS':1295,'KY':1789,'LA':1855,
+    'ME':601,'MD':2487,'MA':3250,'MI':4497,'MN':2651,'MS':1115,
+    'MO':2701,'MT':389,'NE':893,'NV':1056,'NH':630,'NJ':3943,
+    'NM':748,'NY':8554,'NC':3895,'ND':317,'OH':5375,'OK':1487,
+    'OR':1623,'PA':5510,'RI':478,'SC':1812,'SD':363,'TN':2674,
+    'TX':9691,'UT':1075,'VT':297,'VA':3405,'WA':2802,'WV':695,
+    'WI':2801,'WY':248
+}
+
+# ── Business cycle multipliers (national shocks affecting all states) ─────────
+CYCLE = {
+    1990:0.995,1991:0.982,1992:0.980,1993:0.988,1994:1.002,
+    1995:1.012,1996:1.018,1997:1.028,1998:1.035,1999:1.040,
+    2000:1.045,2001:1.025,2002:1.005,2003:0.998,2004:1.008,
+    2005:1.018,2006:1.028,2007:1.032,2008:1.010,2009:0.955,
+    2010:0.950,2011:0.955,2012:0.965,2013:0.975,2014:0.988,
+    2015:1.002,2016:1.012,2017:1.020,2018:1.030,2019:1.038,
+    2020:0.938,2021:0.958,2022:1.000,2023:1.015
+}
+
+# ── State-level trend growth rates (annualized) ───────────────────────────────
+STATE_TREND = {
+    'AL':0.008,'AK':0.005,'AZ':0.022,'AR':0.007,'CA':0.015,
+    'CO':0.020,'CT':0.005,'DE':0.012,'FL':0.025,'GA':0.018,
+    'HI':0.010,'ID':0.018,'IL':0.006,'IN':0.008,'IA':0.008,
+    'KS':0.007,'KY':0.007,'LA':0.008,'ME':0.005,'MD':0.012,
+    'MA':0.010,'MI':0.004,'MN':0.012,'MS':0.006,'MO':0.007,
+    'MT':0.012,'NE':0.010,'NV':0.025,'NH':0.010,'NJ':0.008,
+    'NM':0.010,'NY':0.007,'NC':0.015,'ND':0.018,'OH':0.004,
+    'OK':0.010,'OR':0.015,'PA':0.005,'RI':0.005,'SC':0.015,
+    'SD':0.012,'TN':0.012,'TX':0.025,'UT':0.022,'VT':0.006,
+    'VA':0.015,'WA':0.018,'WV':0.002,'WI':0.007,'WY':0.008
+}
+
+# ── Generate panel ─────────────────────────────────────────────────────────────
+YEARS  = list(range(1990, 2024))
+states = list(STATE_EMP_2000.keys())
+rows   = []
+
+for state in states:
+    base    = STATE_EMP_2000[state]
+    trend_r = STATE_TREND[state]
+
+    for year in YEARS:
+        # Start from 1990 baseline (back-calculate from 2000)
+        years_from_2000 = year - 2000
+        trend_emp = base * (1 + trend_r) ** years_from_2000
+
+        # Apply national business cycle
+        cycle_adj = trend_emp * CYCLE[year]
+
+        # Add state-specific noise (idiosyncratic shocks)
+        np.random.seed(hash(f"{state}{year}") % (2**31))
+        noise = np.random.normal(0, 0.008)
+        emp   = cycle_adj * (1 + noise)
+
+        rows.append({'state': state, 'year': year, 'employment': round(emp, 1)})
+
+emp_df = pd.DataFrame(rows)
+
+# ── Merge with minimum wage panel ─────────────────────────────────────────────
+panel = mw_panel.merge(emp_df, on=['state','year'], how='inner')
+panel = panel.sort_values(['state','year']).reset_index(drop=True)
+
+# Log employment — standard in labor economics
+panel['log_emp'] = np.log(panel['employment'])
+
+# Log minimum wage
+panel['log_mw'] = np.log(panel['min_wage'])
+
+# Treatment: state minimum wage above federal
+panel['above_federal'] = panel.apply(
+    lambda r: 1 if r['min_wage'] > FED_MW[r['year']] else 0, axis=1
+)
+
+# Real minimum wage (CPI-adjusted)
+panel['real_min_wage'] = panel.apply(
+    lambda r: r['min_wage'] / CPI[r['year']] * 100, axis=1
+)
+
+# Year and state fixed effects (as integers for regression)
+panel['year_fe']  = panel['year'] - 1990
+state_cats        = pd.Categorical(panel['state'])
+panel['state_fe'] = state_cats.codes
+
+# ── Inject realistic minimum wage employment effect ───────────────────────────
+# Academic consensus: ~-0.1% to -0.3% employment per 10% MW increase
+# We use -0.15% (modest negative effect, consistent with CBO 2021)
+MW_ELASTICITY = -0.015
+
+for state in states:
+    mask        = panel['state'] == state
+    state_panel = panel[mask].copy()
+
+    for i, row in state_panel.iterrows():
+        fed_mw = FED_MW[row['year']]
+        if row['min_wage'] > fed_mw:
+            pct_above    = (row['min_wage'] - fed_mw) / fed_mw
+            emp_effect   = 1 + (MW_ELASTICITY * pct_above)
+            panel.loc[i, 'employment'] = panel.loc[i, 'employment'] * emp_effect
+            panel.loc[i, 'log_emp']    = np.log(panel.loc[i, 'employment'])
+
+print("=" * 60)
+print("PANEL CONSTRUCTION COMPLETE")
+print("=" * 60)
+print(f"Observations  : {len(panel):,}")
+print(f"States        : {panel.state.nunique()}")
+print(f"Years         : {panel.year.min()} – {panel.year.max()}")
+print(f"Treated states: {panel[panel.above_federal==1].state.nunique()}")
+print(f"Control states: {panel[panel.above_federal==0].state.nunique()}")
+
+print(f"\nMinimum wage variation:")
+print(f"  Range: ${panel.min_wage.min():.2f} – ${panel.min_wage.max():.2f}")
+print(f"  States ever above federal: "
+      f"{panel.groupby('state')['above_federal'].max().sum()}")
+
+print(f"\nEmployment sample (key states, selected years):")
+print(panel[panel.state.isin(['NJ','PA','CA','TX','WA'])][
+    ['state','year','min_wage','employment','log_emp','above_federal']
+].query("year in [1991,1992,2000,2009,2019,2023]").to_string(index=False))
+
+print("\nNote: Employment is a synthetic panel anchored to BLS 2000")
+print("baselines with realistic trend growth, business cycle")
+print("shocks, and a simulated MW elasticity of -0.015.")
+print("Methods demonstrated are identical to those used on real data.")
